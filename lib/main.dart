@@ -8,7 +8,6 @@ import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:vibration/vibration.dart';
-import 'package:flutter_beep/flutter_beep.dart';
 
 void main() {
   runApp(const GeoScannerApp());
@@ -160,8 +159,6 @@ class _ScannerPageState extends State<ScannerPage>
   }
 
   void feedback() async {
-
-    FlutterBeep.beep();
 
     if (await Vibration.hasVibrator() ?? false) {
       Vibration.vibrate(duration: 80);
