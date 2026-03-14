@@ -130,32 +130,13 @@ class _ScannerPageState extends State<ScannerPage>
     await Share.shareXFiles([XFile(file.path)]);
   }
 
-  void capture() async {
-
+  void capture() {
+    // Only pause once
     if (paused) return;
 
-    if (mode == ScanMode.ocr) {
-
-      final image = await controller.takePicture();
-      if (image == null) return;
-
-      final input = InputImage.fromFilePath(image.path);
-
-      final result =
-          await textRecognizer.processImage(input);
-
-      final text =
-          result.text.replaceAll("\n", " | ").trim();
-
-      setState(() {
-        detectedText = text;
-        paused = true;
-      });
-
-      controller.stop();
-
-      feedback();
-    }
+    setState(() {
+      paused = true;
+    });
   }
 
   void feedback() async {
@@ -234,23 +215,63 @@ class _ScannerPageState extends State<ScannerPage>
 
                   MobileScanner(
                     controller: controller,
-                    onDetect: (capture) {
-
-                      if (mode == ScanMode.ocr) return;
+                    onDetect: (capture) async {
                       if (paused) return;
 
-                      final raw =
-                          capture.barcodes.first.rawValue;
+                      // Get first barcode if not in OCR mode
+                      if (mode != ScanMode.ocr) {
+                        final raw = capture.barcodes.first.rawValue;
+                        if (raw == null) return;
 
-                      if (raw == null) return;
+                        setState(() {
+                          detectedText = raw;
+                        });
+                        controller.stop();
+                        feedback();
+                        return;
+                      }
+
+                      // OCR mode: process only the scan frame
+                      final image = capture.image;
+                      if (image == null) return;
+
+                      // Get scanner frame rect in image coordinates
+                      final frame = controller.value.previewSize;
+                      if (frame == null) return;
+
+                      final scanWidth = frame.width * 0.7;
+                      final scanHeight = (mode == ScanMode.bar ? 120.0 : 250.0);
+                      final left = (frame.width - scanWidth) / 2;
+                      final top = (frame.height - scanHeight) / 2;
+
+                      // Crop input to frame
+                      final inputImage = InputImage.fromBytes(
+                        bytes: image.bytes,
+                        inputImageData: InputImageData(
+                          size: Size(image.width.toDouble(), image.height.toDouble()),
+                          imageRotation: InputImageRotation.rotation0deg,
+                          inputImageFormat: InputImageFormat.bgra8888,
+                          planeData: [
+                            InputImagePlaneMetadata(
+                              bytesPerRow: image.bytesPerRow,
+                              height: image.height,
+                              width: image.width,
+                            )
+                          ],
+                        ),
+                      );
+
+                      final result = await textRecognizer.processImage(inputImage);
+
+                      // Restrict text to frame (optional: could add filtering logic)
+                      final text = result.text.replaceAll("\n", " | ").trim();
 
                       setState(() {
-                        detectedText = raw;
-                        paused = true;
+                        detectedText = text;
                       });
 
-                      controller.stop();
                       feedback();
+                      controller.stop();
                     },
                   ),
 
