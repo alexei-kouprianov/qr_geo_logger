@@ -9,11 +9,11 @@ dependencies:
   flutter:
     sdk: flutter
 
-  mobile_scanner: ^3.5.2
-  geolocator: ^10.1.0
+  mobile_scanner: ^7.2.0
+  geolocator: ^14.0.2
   path_provider: ^2.1.2
-  share_plus: ^7.2.1
-  intl: ^0.18.1
+  share_plus: ^12.0.1
+  intl: ^0.20.2
 
 flutter:
   uses-material-design: true
