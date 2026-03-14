@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:vibration/vibration.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image_picker/image_picker.dart';
 
 void main() {
   runApp(const GeoScannerApp());
@@ -20,9 +22,7 @@ class GeoScannerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: ScannerPage(),
-    );
+    return const MaterialApp(home: ScannerPage());
   }
 }
 
@@ -38,6 +38,7 @@ class _ScannerPageState extends State<ScannerPage>
 
   final MobileScannerController controller = MobileScannerController();
   final TextRecognizer textRecognizer = TextRecognizer();
+  final ImagePicker picker = ImagePicker();
 
   ScanMode mode = ScanMode.qr;
 
@@ -69,8 +70,8 @@ class _ScannerPageState extends State<ScannerPage>
   Future<void> initGps() async {
     await Geolocator.requestPermission();
 
-    gpsStream =
-        Geolocator.getPositionStream().listen((pos) {
+    gpsStream = Geolocator.getPositionStream()
+        .listen((pos) {
       setState(() {
         lastPosition = pos;
       });
@@ -130,13 +131,30 @@ class _ScannerPageState extends State<ScannerPage>
     await Share.shareXFiles([XFile(file.path)]);
   }
 
-  void capture() {
-    // Only pause once
+  Future<void> captureOcr() async {
+
     if (paused) return;
 
+    final photo =
+        await picker.pickImage(source: ImageSource.camera);
+
+    if (photo == null) return;
+
+    final input =
+        InputImage.fromFilePath(photo.path);
+
+    final result =
+        await textRecognizer.processImage(input);
+
+    final text =
+        result.text.replaceAll("\n", " | ").trim();
+
     setState(() {
+      detectedText = text;
       paused = true;
     });
+
+    feedback();
   }
 
   void feedback() async {
@@ -206,8 +224,10 @@ class _ScannerPageState extends State<ScannerPage>
           Expanded(
             child: GestureDetector(
 
-              onTapDown: (details) {
-                capture();
+              onTap: () {
+                if (mode == ScanMode.ocr) {
+                  captureOcr();
+                }
               },
 
               child: Stack(
@@ -215,63 +235,23 @@ class _ScannerPageState extends State<ScannerPage>
 
                   MobileScanner(
                     controller: controller,
-                    onDetect: (capture) async {
+                    onDetect: (capture) {
+
                       if (paused) return;
+                      if (mode == ScanMode.ocr) return;
 
-                      // Get first barcode if not in OCR mode
-                      if (mode != ScanMode.ocr) {
-                        final raw = capture.barcodes.first.rawValue;
-                        if (raw == null) return;
+                      final raw =
+                          capture.barcodes.first.rawValue;
 
-                        setState(() {
-                          detectedText = raw;
-                        });
-                        controller.stop();
-                        feedback();
-                        return;
-                      }
-
-                      // OCR mode: process only the scan frame
-                      final image = capture.image;
-                      if (image == null) return;
-
-                      // Get scanner frame rect in image coordinates
-                      final frame = controller.value.previewSize;
-                      if (frame == null) return;
-
-                      final scanWidth = frame.width * 0.7;
-                      final scanHeight = (mode == ScanMode.bar ? 120.0 : 250.0);
-                      final left = (frame.width - scanWidth) / 2;
-                      final top = (frame.height - scanHeight) / 2;
-
-                      // Crop input to frame
-                      final inputImage = InputImage.fromBytes(
-                        bytes: image.bytes,
-                        inputImageData: InputImageData(
-                          size: Size(image.width.toDouble(), image.height.toDouble()),
-                          imageRotation: InputImageRotation.rotation0deg,
-                          inputImageFormat: InputImageFormat.bgra8888,
-                          planeData: [
-                            InputImagePlaneMetadata(
-                              bytesPerRow: image.bytesPerRow,
-                              height: image.height,
-                              width: image.width,
-                            )
-                          ],
-                        ),
-                      );
-
-                      final result = await textRecognizer.processImage(inputImage);
-
-                      // Restrict text to frame (optional: could add filtering logic)
-                      final text = result.text.replaceAll("\n", " | ").trim();
+                      if (raw == null) return;
 
                       setState(() {
-                        detectedText = text;
+                        detectedText = raw;
+                        paused = true;
                       });
 
-                      feedback();
                       controller.stop();
+                      feedback();
                     },
                   ),
 
