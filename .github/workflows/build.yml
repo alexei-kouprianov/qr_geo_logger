@@ -33,23 +33,28 @@ jobs:
           # Remove the default main.dart
           rm build_app/lib/main.dart
           # Copy your main.dart from repo root
-          cp main.dart build_app/lib/main.dart
+          cp lib/main.dart build_app/lib/main.dart
           # Copy your pubspec.yaml from repo root
           cp pubspec.yaml build_app/pubspec.yaml
 
-      # 4. Get dependencies
+      # 4. Disable R8 shrinking (required for ML Kit OCR)
+      - name: Patch Gradle for ML Kit
+        run: |
+          sed -i '/buildTypes {/a\        release {\n            minifyEnabled false\n            shrinkResources false\n        }' build_app/android/app/build.gradle
+
+      # 5. Get dependencies
       - name: Install dependencies
         run: |
           cd build_app
           flutter pub get
 
-      # 5. Build release APK
+      # 6. Build release APK
       - name: Build release APK
         run: |
           cd build_app
           flutter build apk --release
 
-      # 6. Upload APK as artifact
+      # 7. Upload APK as artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
