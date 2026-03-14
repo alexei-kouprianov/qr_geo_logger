@@ -1,37 +1,13 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:intl/intl.dart';
 
 void main() {
   runApp(const QRGeoLogger());
-}
-
-enum ScanMode { qr, barcode }
-
-class ScanRecord {
-  String timestamp;
-  double lon;
-  double lat;
-  double alt;
-  double acc;
-  String text;
-
-  ScanRecord(
-      this.timestamp,
-      this.lon,
-      this.lat,
-      this.alt,
-      this.acc,
-      this.text
-      );
-
-  String csv() =>
-      '"$timestamp","$lon","$lat","$alt","$acc","$text"';
 }
 
 class QRGeoLogger extends StatelessWidget {
@@ -39,395 +15,288 @@ class QRGeoLogger extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: ScannerPage(),
+    return MaterialApp(
+      title: "QR Geo Logger",
+      theme: ThemeData.dark(),
+      home: const ScannerScreen(),
     );
   }
 }
 
-class ScannerPage extends StatefulWidget {
-  const ScannerPage({super.key});
+class ScanRecord {
+  final DateTime time;
+  final double? lat;
+  final double? lon;
+  final double? alt;
+  final double? acc;
+  final String text;
 
-  @override
-  State<ScannerPage> createState() => _ScannerPageState();
+  ScanRecord(
+      {required this.time,
+      required this.lat,
+      required this.lon,
+      required this.alt,
+      required this.acc,
+      required this.text});
+
+  String toCSV() {
+    final t = DateFormat("yyyy-MM-dd HH:mm:ss").format(time);
+    return '"$t","$lon","$lat","$alt","$acc","$text"';
+  }
 }
 
-class _ScannerPageState extends State<ScannerPage> {
-
-  ScanMode mode = ScanMode.qr;
-
-  String? lastDetectedCode;
-  String? lastSavedCode;
-
-  DateTime lastScanTime = DateTime.now();
-
-  List<ScanRecord> records = [];
-
-  Position? currentPos;
-
-  final controller = MobileScannerController();
+class ScannerScreen extends StatefulWidget {
+  const ScannerScreen({super.key});
 
   @override
-  void initState() {
-    super.initState();
-    updateLocation();
-  }
+  State<ScannerScreen> createState() => _ScannerScreenState();
+}
 
-  Future updateLocation() async {
+class _ScannerScreenState extends State<ScannerScreen> {
 
-    await Geolocator.requestPermission();
+  final MobileScannerController controller = MobileScannerController();
 
-    currentPos = await Geolocator.getCurrentPosition();
+  Barcode? lastBarcode;
+  String? lastText;
 
-    setState(() {});
-  }
+  bool qrMode = true;
 
-  String timestamp() {
-    return DateFormat("yyyy-MM-dd HH:mm:ss").format(DateTime.now());
-  }
+  final List<ScanRecord> records = [];
 
-  Future saveScan() async {
+  Future<Position?> getPosition() async {
+    try {
+      bool enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return null;
 
-    if (lastDetectedCode == null) return;
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
 
-    Position pos = await Geolocator.getCurrentPosition();
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
 
-    ScanRecord rec = ScanRecord(
-        timestamp(),
-        pos.longitude,
-        pos.latitude,
-        pos.altitude,
-        pos.accuracy,
-        lastDetectedCode!
-    );
-
-    setState(() {
-
-      records.add(rec);
-      lastSavedCode = lastDetectedCode;
-      lastDetectedCode = null;
-
-    });
-  }
-
-  Future<File> buildCsv() async {
-
-    final dir = await getTemporaryDirectory();
-
-    final filename =
-        "geotagged_qr.${DateFormat("yyyy-MM-dd_HH-mm-ss").format(DateTime.now())}.csv";
-
-    final file = File("${dir.path}/$filename");
-
-    final buffer = StringBuffer();
-
-    buffer.writeln('"timestamp","longitude","latitude","altitude","accuracy","text"');
-
-    for (var r in records) {
-      buffer.writeln(r.csv());
+      return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.best);
+    } catch (_) {
+      return null;
     }
-
-    return file.writeAsString(buffer.toString());
   }
 
-  Future shareCsv() async {
+  void onBarcode(Barcode barcode) {
+    final String? value = barcode.rawValue;
+    if (value == null) return;
 
-    File file = await buildCsv();
-
-    Share.shareXFiles([XFile(file.path)]);
-  }
-
-  void discard() {
+    if (value == lastText) return;
 
     setState(() {
-
-      records.clear();
-      lastSavedCode = null;
-
+      lastBarcode = barcode;
+      lastText = value;
     });
-
   }
 
-  void onDetect(Barcode barcode) {
+  Future<void> saveCurrent() async {
 
-    final text = barcode.rawValue;
+    if (lastText == null) return;
 
-    if (text == null) return;
+    final pos = await getPosition();
 
-    final now = DateTime.now();
+    final record = ScanRecord(
+      time: DateTime.now(),
+      lat: pos?.latitude,
+      lon: pos?.longitude,
+      alt: pos?.altitude,
+      acc: pos?.accuracy,
+      text: lastText!,
+    );
 
-    if (text == lastDetectedCode &&
-        now.difference(lastScanTime).inSeconds < 3) {
+    if (records.isNotEmpty && records.last.text == record.text) {
       return;
     }
 
-    lastScanTime = now;
-
     setState(() {
-      lastDetectedCode = text;
+      records.add(record);
     });
 
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("Saved")));
   }
 
-  void toggleMode() {
+  String buildCSV() {
+    return records.map((r) => r.toCSV()).join("\n");
+  }
 
+  Future<void> shareCSV() async {
+
+    if (records.isEmpty) return;
+
+    final dir = await getTemporaryDirectory();
+
+    final now = DateFormat("yyyy-MM-dd_HH-mm-ss").format(DateTime.now());
+
+    final file = File("${dir.path}/geotagged_qr.$now.csv");
+
+    await file.writeAsString(buildCSV());
+
+    await Share.shareXFiles([XFile(file.path)]);
+  }
+
+  void discardCSV() {
     setState(() {
-
-      if (mode == ScanMode.qr) {
-        mode = ScanMode.barcode;
-      } else {
-        mode = ScanMode.qr;
-      }
-
+      records.clear();
     });
-
-  }
-
-  void openPreview() {
-
-    Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (context) => CsvPreviewPage(records: records)
-        )
-    );
-
   }
 
   @override
   Widget build(BuildContext context) {
 
-    return Scaffold(
+    final frame = qrMode
+        ? const AspectRatio(aspectRatio: 1)
+        : const AspectRatio(aspectRatio: 2.5);
 
+    return Scaffold(
       appBar: AppBar(
         title: const Text("QR Geo Logger"),
         actions: [
           IconButton(
-              onPressed: openPreview,
-              icon: const Icon(Icons.table_view)
+              onPressed: () {
+                setState(() {
+                  qrMode = !qrMode;
+                });
+              },
+              icon: Icon(qrMode ? Icons.qr_code : Icons.view_week)),
+          IconButton(
+              onPressed: () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => CSVScreen(
+                              records: records,
+                              onShare: shareCSV,
+                              onDiscard: discardCSV,
+                            )));
+              },
+              icon: const Icon(Icons.table_view))
+        ],
+      ),
+      body: Stack(
+        children: [
+
+          MobileScanner(
+            controller: controller,
+            onDetect: (BarcodeCapture capture) {
+              final List<Barcode> barcodes = capture.barcodes;
+
+              if (barcodes.isEmpty) return;
+
+              onBarcode(barcodes.first);
+            },
+          ),
+
+          Center(
+            child: Container(
+              width: 250,
+              height: qrMode ? 250 : 100,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.green, width: 3),
+              ),
+            ),
+          ),
+
+          if (lastText != null)
+            Positioned(
+              bottom: 120,
+              left: 20,
+              right: 20,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                color: Colors.black87,
+                child: Text(
+                  lastText!,
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+            ),
+
+          Positioned(
+            bottom: 30,
+            left: 40,
+            right: 40,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  padding: const EdgeInsets.all(20)),
+              onPressed: saveCurrent,
+              child: const Text("SAVE", style: TextStyle(fontSize: 24)),
+            ),
           )
         ],
       ),
-
-      body: Column(
-
-        children: [
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-
-              TextButton(
-                  onPressed: () {
-                    setState(() {
-                      mode = ScanMode.qr;
-                    });
-                  },
-                  child: const Text("QR")
-              ),
-
-              TextButton(
-                  onPressed: () {
-                    setState(() {
-                      mode = ScanMode.barcode;
-                    });
-                  },
-                  child: const Text("BARCODE")
-              ),
-
-            ],
-          ),
-
-          Expanded(
-
-            child: Stack(
-
-              children: [
-
-                MobileScanner(
-
-                  controller: MobileScannerController(
-
-                    formats: mode == ScanMode.qr
-                        ? [BarcodeFormat.qrCode]
-                        : [
-                      BarcodeFormat.code128,
-                      BarcodeFormat.ean13,
-                      BarcodeFormat.ean8
-                    ],
-
-                  ),
-
-                  onDetect: (barcode, args) {
-                    onDetect(barcode);
-                  },
-
-                ),
-
-                Center(
-
-                  child: Container(
-
-                    width: mode == ScanMode.qr ? 250 : 320,
-                    height: mode == ScanMode.qr ? 250 : 120,
-
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.white, width: 4),
-                    ),
-
-                  ),
-
-                )
-
-              ],
-
-            ),
-
-          ),
-
-          if (lastDetectedCode != null)
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Text(
-                "Last read: $lastDetectedCode",
-                style: const TextStyle(fontSize: 16),
-              ),
-            ),
-
-          if (currentPos != null)
-            Text(
-              "GPS: ${currentPos!.latitude}, ${currentPos!.longitude} ±${currentPos!.accuracy}m",
-              style: const TextStyle(fontSize: 14),
-            ),
-
-          const SizedBox(height: 10),
-
-          ElevatedButton(
-
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 60,
-                    vertical: 20
-                )
-            ),
-
-            onPressed: saveScan,
-
-            child: const Text(
-              "SAVE",
-              style: TextStyle(fontSize: 20),
-            ),
-
-          ),
-
-          const SizedBox(height: 15),
-
-        ],
-
-      ),
-
     );
-
   }
-
 }
 
-class CsvPreviewPage extends StatelessWidget {
+class CSVScreen extends StatelessWidget {
 
   final List<ScanRecord> records;
+  final VoidCallback onShare;
+  final VoidCallback onDiscard;
 
-  const CsvPreviewPage({super.key, required this.records});
+  const CSVScreen(
+      {super.key,
+      required this.records,
+      required this.onShare,
+      required this.onDiscard});
 
   @override
   Widget build(BuildContext context) {
 
+    final csv = records.map((r) => r.toCSV()).join("\n");
+
     return Scaffold(
+      appBar: AppBar(title: const Text("CSV Preview")),
+      body: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
 
-      appBar: AppBar(
-        title: const Text("CSV Preview"),
-      ),
-
-      body: Column(
-
-        children: [
-
-          Expanded(
-
-            child: ListView.builder(
-
-              itemCount: records.length,
-
-              itemBuilder: (c, i) {
-
-                final r = records[i];
-
-                return ListTile(
-
-                  title: Text(r.text),
-
-                  subtitle: Text(
-                      "${r.timestamp}  ${r.lat},${r.lon}"
-                  ),
-
-                );
-
-              },
-
+            Expanded(
+              child: SingleChildScrollView(
+                child: SelectableText(csv),
+              ),
             ),
 
-          ),
+            const SizedBox(height: 10),
 
-          Row(
+            Row(
+              children: [
 
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green),
+                    onPressed: onShare,
+                    child: const Text("Send / Share"),
+                  ),
+                ),
 
-            children: [
+                const SizedBox(width: 10),
 
-              ElevatedButton(
-                onPressed: () async {
-
-                  final dir = await getTemporaryDirectory();
-
-                  final filename =
-                      "geotagged_qr.${DateFormat("yyyy-MM-dd_HH-mm-ss").format(DateTime.now())}.csv";
-
-                  final file = File("${dir.path}/$filename");
-
-                  final buffer = StringBuffer();
-
-                  buffer.writeln('"timestamp","longitude","latitude","altitude","accuracy","text"');
-
-                  for (var r in records) {
-                    buffer.writeln(r.csv());
-                  }
-
-                  await file.writeAsString(buffer.toString());
-
-                  Share.shareXFiles([XFile(file.path)]);
-                },
-                child: const Text("SHARE"),
-              ),
-
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                },
-                child: const Text("BACK"),
-              ),
-
-            ],
-
-          ),
-
-          const SizedBox(height: 20)
-
-        ],
-
+                Expanded(
+                  child: ElevatedButton(
+                    style:
+                        ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    onPressed: onDiscard,
+                    child: const Text("Discard"),
+                  ),
+                )
+              ],
+            )
+          ],
+        ),
       ),
-
     );
-
   }
-
 }
