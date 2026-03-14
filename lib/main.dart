@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:vibration/vibration.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -157,11 +157,8 @@ class _ScannerPageState extends State<ScannerPage>
     feedback();
   }
 
-  void feedback() async {
-
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: 80);
-    }
+  void feedback() {
+    HapticFeedback.heavyImpact();
   }
 
   void save() async {
