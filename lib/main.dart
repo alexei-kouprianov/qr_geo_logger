@@ -9,7 +9,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:image_picker/image_picker.dart';
 
 void main() {
   runApp(const GeoScannerApp());
@@ -38,12 +37,13 @@ class _ScannerPageState extends State<ScannerPage>
 
   final MobileScannerController controller = MobileScannerController();
   final TextRecognizer textRecognizer = TextRecognizer();
-  final ImagePicker picker = ImagePicker();
 
   ScanMode mode = ScanMode.qr;
 
   String detectedText = "";
   String lastDetected = "";
+
+  bool torchOn = false;
 
   Position? lastPosition;
   StreamSubscription? gpsStream;
@@ -67,10 +67,21 @@ class _ScannerPageState extends State<ScannerPage>
   }
 
   Future<void> initGps() async {
-    await Geolocator.requestPermission();
 
-    gpsStream = Geolocator.getPositionStream()
-        .listen((pos) {
+    LocationPermission permission =
+        await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    gpsStream =
+        Geolocator.getPositionStream().listen((pos) {
       setState(() {
         lastPosition = pos;
       });
@@ -81,13 +92,16 @@ class _ScannerPageState extends State<ScannerPage>
 
     final dir = await getApplicationDocumentsDirectory();
 
-    workingFile = File("${dir.path}/working_session.csv");
+    workingFile =
+        File("${dir.path}/working_session.csv");
 
     if (await workingFile!.exists()) {
       csvLines = await workingFile!.readAsLines();
     } else {
-      csvLines.add('"timestamp","lon","lat","alt","acc","text"');
-      await workingFile!.writeAsString(csvLines.join("\n"));
+      csvLines.add(
+          '"timestamp","lon","lat","alt","acc","text"');
+      await workingFile!
+          .writeAsString(csvLines.join("\n"));
     }
 
     setState(() {});
@@ -95,17 +109,21 @@ class _ScannerPageState extends State<ScannerPage>
 
   Future<void> appendCsv(String text) async {
 
-    if (lastPosition == null) return;
+    final ts = DateFormat("yyyy-MM-dd HH:mm:ss")
+        .format(DateTime.now());
 
-    final ts =
-        DateFormat("yyyy-MM-dd HH:mm:ss").format(DateTime.now());
+    final lon = lastPosition?.longitude ?? 0;
+    final lat = lastPosition?.latitude ?? 0;
+    final alt = lastPosition?.altitude ?? 0;
+    final acc = lastPosition?.accuracy ?? 0;
 
     final line =
-        '"$ts","${lastPosition!.longitude}","${lastPosition!.latitude}","${lastPosition!.altitude}","${lastPosition!.accuracy}","$text"';
+        '"$ts","$lon","$lat","$alt","$acc","$text"';
 
     csvLines.add(line);
 
-    await workingFile!.writeAsString(csvLines.join("\n"));
+    await workingFile!
+        .writeAsString(csvLines.join("\n"));
 
     setState(() {});
   }
@@ -115,9 +133,11 @@ class _ScannerPageState extends State<ScannerPage>
     final dir = await getApplicationDocumentsDirectory();
 
     final ts =
-        DateFormat("yyyy-MM-dd_HH-mm-ss").format(DateTime.now());
+        DateFormat("yyyy-MM-dd_HH-mm-ss")
+            .format(DateTime.now());
 
-    final file = File("${dir.path}/scan.$ts.csv");
+    final file =
+        File("${dir.path}/scan.$ts.csv");
 
     await file.writeAsString(csvLines.join("\n"));
 
@@ -130,19 +150,20 @@ class _ScannerPageState extends State<ScannerPage>
       '"timestamp","lon","lat","alt","acc","text"'
     ];
 
-    await workingFile!.writeAsString(csvLines.join("\n"));
+    await workingFile!
+        .writeAsString(csvLines.join("\n"));
 
     setState(() {});
   }
 
   void feedback() {
-    HapticFeedback.heavyImpact();
+    HapticFeedback.mediumImpact();
   }
 
   void capture() async {
 
     if (mode == ScanMode.ocr) {
-      captureOcr();
+      runOcr();
       return;
     }
 
@@ -158,15 +179,14 @@ class _ScannerPageState extends State<ScannerPage>
     });
   }
 
-  Future<void> captureOcr() async {
+  void runOcr() async {
 
-    final photo =
-        await picker.pickImage(source: ImageSource.camera);
+    final image = await controller.takePicture();
 
-    if (photo == null) return;
+    if (image == null) return;
 
     final input =
-        InputImage.fromFilePath(photo.path);
+        InputImage.fromFilePath(image.path);
 
     final result =
         await textRecognizer.processImage(input);
@@ -183,6 +203,23 @@ class _ScannerPageState extends State<ScannerPage>
     setState(() {
       detectedText = text;
     });
+  }
+
+  bool insideFrame(Rect? box, Size size, double frameHeight) {
+
+    if (box == null) return false;
+
+    final frameWidth = size.width * 0.7;
+
+    final left = (size.width - frameWidth) / 2;
+    final top = (size.height - frameHeight) / 2;
+
+    final frame =
+        Rect.fromLTWH(left, top, frameWidth, frameHeight);
+
+    final center = box.center;
+
+    return frame.contains(center);
   }
 
   void openCsvPreview() {
@@ -217,45 +254,84 @@ class _ScannerPageState extends State<ScannerPage>
               modeBtn(ScanMode.bar, "BAR"),
               const SizedBox(width: 8),
               modeBtn(ScanMode.ocr, "OCR"),
+              const SizedBox(width: 12),
+
+              IconButton(
+                icon: Icon(
+                    torchOn
+                        ? Icons.flashlight_on
+                        : Icons.flashlight_off,
+                    color: Colors.orange),
+                onPressed: () {
+                  controller.toggleTorch();
+                  setState(() {
+                    torchOn = !torchOn;
+                  });
+                },
+              )
             ],
           ),
 
           Expanded(
-            child: Stack(
-              children: [
+            child: LayoutBuilder(
+              builder: (context, constraints) {
 
-                MobileScanner(
-                  controller: controller,
-                  onDetect: (capture) {
+                final size = Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight);
 
-                    if (mode == ScanMode.ocr) return;
+                return Stack(
+                  children: [
 
-                    final raw =
-                        capture.barcodes.first.rawValue;
+                    MobileScanner(
+                      controller: controller,
+                      onDetect: (capture) {
 
-                    if (raw == null) return;
+                        if (mode == ScanMode.ocr) return;
 
-                    if (raw == lastDetected) return;
+                        final barcode =
+                            capture.barcodes.first;
 
-                    setState(() {
-                      lastDetected = raw;
-                      detectedText = raw;
-                    });
-                  },
-                ),
+                        if (!insideFrame(
+                            barcode.boundingBox,
+                            size,
+                            frameHeight)) return;
 
-                AnimatedBuilder(
-                  animation: animation,
-                  builder: (_, __) {
-                    return CustomPaint(
-                      painter: ScanFramePainter(
-                          frameHeight: frameHeight,
-                          progress: animation.value),
-                      size: Size.infinite,
-                    );
-                  },
-                ),
-              ],
+                        if (mode == ScanMode.qr &&
+                            barcode.format !=
+                                BarcodeFormat.qrCode) return;
+
+                        if (mode == ScanMode.bar &&
+                            barcode.format ==
+                                BarcodeFormat.qrCode) return;
+
+                        final raw = barcode.rawValue;
+
+                        if (raw == null) return;
+
+                        if (raw == lastDetected) return;
+
+                        setState(() {
+                          lastDetected = raw;
+                          detectedText = raw;
+                        });
+                      },
+                    ),
+
+                    AnimatedBuilder(
+                      animation: animation,
+                      builder: (_, __) {
+                        return CustomPaint(
+                          painter: ScanFramePainter(
+                              frameHeight: frameHeight,
+                              progress: animation.value),
+                          size: Size.infinite,
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
             ),
           ),
 
@@ -351,33 +427,36 @@ class CsvPreview extends StatelessWidget {
                   children:
                       lines.map((e) => Text(e)).toList())),
 
-          Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceEvenly,
-            children: [
+          SizedBox(
+            width: double.infinity,
+            child: Row(
+              mainAxisAlignment:
+                  MainAxisAlignment.spaceEvenly,
+              children: [
 
-              ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey),
-                  onPressed: () =>
-                      Navigator.pop(context),
-                  child: const Text("Back to Scan")),
+                ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey),
+                    onPressed: () =>
+                        Navigator.pop(context),
+                    child: const Text("Back to Scan")),
 
-              ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green),
-                  onPressed: onShare,
-                  child: const Text("Share CSV")),
+                ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green),
+                    onPressed: onShare,
+                    child: const Text("Share CSV")),
 
-              ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red),
-                  onPressed: () {
-                    onDiscard();
-                    Navigator.pop(context);
-                  },
-                  child: const Text("Discard"))
-            ],
+                ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red),
+                    onPressed: () {
+                      onDiscard();
+                      Navigator.pop(context);
+                    },
+                    child: const Text("Discard")),
+              ],
+            ),
           ),
 
           const SizedBox(height: 20)
