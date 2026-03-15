@@ -25,6 +25,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       # 3. Create a temporary Flutter project on the runner
       - name: Create Flutter project
@@ -52,6 +53,7 @@ jobs:
         run: |
           cd build_app
           flutter pub get
+          flutter pub upgrade
 
       # 6. Build release APK
       - name: Build release APK

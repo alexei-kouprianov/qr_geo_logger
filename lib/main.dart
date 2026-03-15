@@ -4,72 +4,92 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:camera/camera.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
-void main() {
-  runApp(const GeoScannerApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final cameras = await availableCameras();
+  runApp(MyApp(cameras));
 }
 
-enum ScanMode { qr, bar, ocr }
+enum ScanMode { code, ocr }
 
-class GeoScannerApp extends StatelessWidget {
-  const GeoScannerApp({super.key});
+class MyApp extends StatelessWidget {
+  final List<CameraDescription> cameras;
+
+  const MyApp(this.cameras, {super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(home: ScannerPage());
+    return MaterialApp(
+      home: ScannerPage(cameras: cameras),
+      debugShowCheckedModeBanner: false,
+    );
   }
 }
 
 class ScannerPage extends StatefulWidget {
-  const ScannerPage({super.key});
+  final List<CameraDescription> cameras;
+
+  const ScannerPage({super.key, required this.cameras});
 
   @override
   State<ScannerPage> createState() => _ScannerPageState();
 }
 
-class _ScannerPageState extends State<ScannerPage>
-    with SingleTickerProviderStateMixin {
+class _ScannerPageState extends State<ScannerPage> {
 
-  final MobileScannerController controller = MobileScannerController();
+  final MobileScannerController scannerController =
+      MobileScannerController(autoStart: false);
+
+  CameraController? cameraController;
+
   final TextRecognizer textRecognizer = TextRecognizer();
 
-  ScanMode mode = ScanMode.qr;
+  ScanMode mode = ScanMode.code;
 
-  String detectedText = "";
-  String lastDetected = "";
+  bool torch = false;
 
-  bool torchOn = false;
+  String detected = "";
+  String preview = "";
+
+  List<String> csv = [];
+  Map<String, String> history = {};
+
+  File? sessionFile;
 
   Position? lastPosition;
-  StreamSubscription? gpsStream;
 
-  List<String> csvLines = [];
-  File? workingFile;
-
-  late AnimationController animation;
+  bool previewVisible = false;
 
   @override
   void initState() {
     super.initState();
-
-    animation = AnimationController(
-        vsync: this,
-        duration: const Duration(seconds: 2))
-      ..repeat(reverse: true);
-
+    initCamera();
     initGps();
-    loadSession();
+    initSession();
+  }
+
+  Future<void> initCamera() async {
+
+    cameraController =
+        CameraController(widget.cameras.first, ResolutionPreset.medium);
+
+    await cameraController!.initialize();
+
+    scannerController.start();
+
+    setState(() {});
   }
 
   Future<void> initGps() async {
 
-    LocationPermission permission =
-        await Geolocator.checkPermission();
+    var permission = await Geolocator.checkPermission();
 
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
@@ -80,28 +100,30 @@ class _ScannerPageState extends State<ScannerPage>
       return;
     }
 
-    gpsStream =
-        Geolocator.getPositionStream().listen((pos) {
-      setState(() {
-        lastPosition = pos;
-      });
+    Geolocator.getPositionStream().listen((pos) {
+      lastPosition = pos;
     });
   }
 
-  Future<void> loadSession() async {
+  Future<void> initSession() async {
 
     final dir = await getApplicationDocumentsDirectory();
 
-    workingFile =
-        File("${dir.path}/working_session.csv");
+    sessionFile = File("${dir.path}/working_session.csv");
 
-    if (await workingFile!.exists()) {
-      csvLines = await workingFile!.readAsLines();
+    if (await sessionFile!.exists()) {
+
+      csv = await sessionFile!.readAsLines();
+
+      for (var l in csv.skip(1)) {
+        final parts = l.split(",");
+        history[parts.last.replaceAll('"', '')] = parts[0];
+      }
+
     } else {
-      csvLines.add(
-          '"timestamp","lon","lat","alt","acc","text"');
-      await workingFile!
-          .writeAsString(csvLines.join("\n"));
+
+      csv = ['"timestamp","lon","lat","alt","acc","text"'];
+      await sessionFile!.writeAsString(csv.join("\n"));
     }
 
     setState(() {});
@@ -109,135 +131,150 @@ class _ScannerPageState extends State<ScannerPage>
 
   Future<void> appendCsv(String text) async {
 
-    final ts = DateFormat("yyyy-MM-dd HH:mm:ss")
-        .format(DateTime.now());
+    final ts = DateFormat("yyyy-MM-dd HH:mm:ss").format(DateTime.now());
 
     final lon = lastPosition?.longitude ?? 0;
     final lat = lastPosition?.latitude ?? 0;
     final alt = lastPosition?.altitude ?? 0;
     final acc = lastPosition?.accuracy ?? 0;
 
-    final line =
-        '"$ts","$lon","$lat","$alt","$acc","$text"';
+    final line = '"$ts","$lon","$lat","$alt","$acc","$text"';
 
-    csvLines.add(line);
+    csv.add(line);
+    history[text] = ts;
 
-    await workingFile!
-        .writeAsString(csvLines.join("\n"));
+    await sessionFile!.writeAsString(csv.join("\n"));
+  }
 
-    setState(() {});
+  void onCapture() async {
+
+    if (mode == ScanMode.code) {
+      scannerController.start();
+    } else {
+      runOcr();
+    }
+  }
+
+  void onBarcode(BarcodeCapture capture) {
+
+    if (previewVisible) return;
+
+    final raw = capture.barcodes.first.rawValue;
+    if (raw == null) return;
+
+    scannerController.stop();
+
+    if (raw == detected) return;
+
+    detected = raw;
+
+    String warning = "";
+
+    if (history.containsKey(raw)) {
+      warning =
+          '"$raw"\nhas already been added on\n${history[raw]}';
+    }
+
+    HapticFeedback.mediumImpact();
+
+    setState(() {
+      preview = warning.isEmpty ? raw : warning;
+      previewVisible = true;
+    });
+  }
+
+  Future<void> runOcr() async {
+
+    final file = await cameraController!.takePicture();
+
+    final input = InputImage.fromFilePath(file.path);
+
+    final result = await textRecognizer.processImage(input);
+
+    final text = result.text.replaceAll("\n", " ");
+
+    if (text.isEmpty) return;
+
+    detected = text;
+
+    String warning = "";
+
+    if (history.containsKey(text)) {
+      warning =
+          '"$text"\nhas already been added on\n${history[text]}';
+    }
+
+    HapticFeedback.mediumImpact();
+
+    setState(() {
+      preview = warning.isEmpty ? text : warning;
+      previewVisible = true;
+    });
+  }
+
+  void saveResult() async {
+
+    await appendCsv(detected);
+
+    setState(() {
+      previewVisible = false;
+      detected = "";
+      preview = "";
+    });
+  }
+
+  void resumeScan() {
+
+    setState(() {
+      previewVisible = false;
+      preview = "";
+      detected = "";
+    });
+  }
+
+  void openCsvPreview() {
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CsvScreen(
+          csv: csv,
+          onShare: shareCsv,
+          onDelete: deleteCsv,
+        ),
+      ),
+    );
   }
 
   Future<void> shareCsv() async {
 
     final dir = await getApplicationDocumentsDirectory();
 
-    final ts =
-        DateFormat("yyyy-MM-dd_HH-mm-ss")
-            .format(DateTime.now());
+    final name =
+        "scan.${DateFormat("yyyy-MM-dd_HH-mm-ss").format(DateTime.now())}.csv";
 
-    final file =
-        File("${dir.path}/scan.$ts.csv");
+    final file = File("${dir.path}/$name");
 
-    await file.writeAsString(csvLines.join("\n"));
+    await file.writeAsString(csv.join("\n"));
 
     await Share.shareXFiles([XFile(file.path)]);
   }
 
-  void discardCsv() async {
+  void deleteCsv() async {
 
-    csvLines = [
-      '"timestamp","lon","lat","alt","acc","text"'
-    ];
+    csv = ['"timestamp","lon","lat","alt","acc","text"'];
+    history.clear();
 
-    await workingFile!
-        .writeAsString(csvLines.join("\n"));
-
-    setState(() {});
-  }
-
-  void feedback() {
-    HapticFeedback.mediumImpact();
-  }
-
-  void capture() async {
-
-    if (mode == ScanMode.ocr) {
-      runOcr();
-      return;
-    }
-
-    if (lastDetected.isEmpty) return;
-
-    await appendCsv(lastDetected);
-
-    feedback();
-
-    setState(() {
-      detectedText = "";
-      lastDetected = "";
-    });
-  }
-
-  void runOcr() async {
-
-    final image = await controller.takePicture();
-
-    if (image == null) return;
-
-    final input =
-        InputImage.fromFilePath(image.path);
-
-    final result =
-        await textRecognizer.processImage(input);
-
-    final text =
-        result.text.replaceAll("\n", " | ").trim();
-
-    if (text.isEmpty) return;
-
-    await appendCsv(text);
-
-    feedback();
-
-    setState(() {
-      detectedText = text;
-    });
-  }
-
-  bool insideFrame(Rect? box, Size size, double frameHeight) {
-
-    if (box == null) return false;
-
-    final frameWidth = size.width * 0.7;
-
-    final left = (size.width - frameWidth) / 2;
-    final top = (size.height - frameHeight) / 2;
-
-    final frame =
-        Rect.fromLTWH(left, top, frameWidth, frameHeight);
-
-    final center = box.center;
-
-    return frame.contains(center);
-  }
-
-  void openCsvPreview() {
-
-    Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (_) => CsvPreview(
-                lines: csvLines,
-                onShare: shareCsv,
-                onDiscard: discardCsv)));
+    await sessionFile!.writeAsString(csv.join("\n"));
   }
 
   @override
   Widget build(BuildContext context) {
 
-    final frameHeight =
-        mode == ScanMode.bar ? 120.0 : 250.0;
+    if (cameraController == null ||
+        !cameraController!.value.isInitialized) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
 
     return Scaffold(
       body: Column(
@@ -246,119 +283,75 @@ class _ScannerPageState extends State<ScannerPage>
           const SizedBox(height: 40),
 
           Row(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              modeBtn(ScanMode.qr, "QR"),
-              const SizedBox(width: 8),
-              modeBtn(ScanMode.bar, "BAR"),
-              const SizedBox(width: 8),
-              modeBtn(ScanMode.ocr, "OCR"),
-              const SizedBox(width: 12),
+
+              modeButton("QR/BAR", ScanMode.code),
+
+              const SizedBox(width: 10),
+
+              modeButton("OCR", ScanMode.ocr),
+
+              const SizedBox(width: 20),
 
               IconButton(
                 icon: Icon(
-                    torchOn
-                        ? Icons.flashlight_on
-                        : Icons.flashlight_off,
-                    color: Colors.orange),
+                    torch ? Icons.flashlight_on : Icons.flashlight_off),
                 onPressed: () {
-                  controller.toggleTorch();
-                  setState(() {
-                    torchOn = !torchOn;
-                  });
+                  scannerController.toggleTorch();
+                  setState(() => torch = !torch);
                 },
-              )
+              ),
             ],
           ),
 
           Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
+            child: Stack(
+              children: [
 
-                final size = Size(
-                    constraints.maxWidth,
-                    constraints.maxHeight);
+                mode == ScanMode.code
+                    ? MobileScanner(
+                        controller: scannerController,
+                        onDetect: onBarcode,
+                      )
+                    : CameraPreview(cameraController!),
 
-                return Stack(
-                  children: [
-
-                    MobileScanner(
-                      controller: controller,
-                      onDetect: (capture) {
-
-                        if (mode == ScanMode.ocr) return;
-
-                        final barcode =
-                            capture.barcodes.first;
-
-                        if (!insideFrame(
-                            barcode.boundingBox,
-                            size,
-                            frameHeight)) return;
-
-                        if (mode == ScanMode.qr &&
-                            barcode.format !=
-                                BarcodeFormat.qrCode) return;
-
-                        if (mode == ScanMode.bar &&
-                            barcode.format ==
-                                BarcodeFormat.qrCode) return;
-
-                        final raw = barcode.rawValue;
-
-                        if (raw == null) return;
-
-                        if (raw == lastDetected) return;
-
-                        setState(() {
-                          lastDetected = raw;
-                          detectedText = raw;
-                        });
-                      },
-                    ),
-
-                    AnimatedBuilder(
-                      animation: animation,
-                      builder: (_, __) {
-                        return CustomPaint(
-                          painter: ScanFramePainter(
-                              frameHeight: frameHeight,
-                              progress: animation.value),
-                          size: Size.infinite,
-                        );
-                      },
-                    ),
-                  ],
-                );
-              },
+                const ScanFrame(),
+              ],
             ),
           ),
 
           Container(
             color: const Color(0xFFFFF8F0),
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(12),
             width: double.infinity,
-            child: Text(
-              detectedText,
-              style: const TextStyle(
-                  color: Colors.black,
-                  fontSize: 16),
-            ),
+            child: Text(preview),
           ),
+
+          if (previewVisible)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+
+                ElevatedButton(
+                  onPressed: saveResult,
+                  child: const Text("Save"),
+                ),
+
+                const SizedBox(width: 20),
+
+                ElevatedButton(
+                  onPressed: resumeScan,
+                  child: const Text("Resume"),
+                ),
+              ],
+            ),
 
           const SizedBox(height: 10),
 
-          SizedBox(
-            width: 220,
-            height: 60,
-            child: ElevatedButton(
-              onPressed: capture,
-              child: const Text(
-                "CAPTURE",
-                style: TextStyle(fontSize: 20),
-              ),
-            ),
+          ElevatedButton(
+            onPressed: onCapture,
+            child: const Text("CAPTURE"),
           ),
 
           const SizedBox(height: 10),
@@ -367,16 +360,19 @@ class _ScannerPageState extends State<ScannerPage>
             color: Colors.black87,
             padding: const EdgeInsets.all(8),
             child: Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.spaceBetween,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
+
                 Text(lastPosition == null
                     ? "GPS..."
                     : "GPS ±${lastPosition!.accuracy.toStringAsFixed(1)} m"),
-                Text("Records ${csvLines.length - 1}"),
+
+                Text("Records ${csv.length - 1}"),
+
                 TextButton(
-                    onPressed: openCsvPreview,
-                    child: const Text("CSV Preview"))
+                  onPressed: openCsvPreview,
+                  child: const Text("CSV"),
+                ),
               ],
             ),
           )
@@ -385,34 +381,32 @@ class _ScannerPageState extends State<ScannerPage>
     );
   }
 
-  Widget modeBtn(ScanMode m, String label) {
+  Widget modeButton(String label, ScanMode m) {
 
     final selected = mode == m;
 
     return ElevatedButton(
-        style: ElevatedButton.styleFrom(
-            backgroundColor:
-                selected ? Colors.green : Colors.grey),
-        onPressed: () {
-          setState(() {
-            mode = m;
-          });
-        },
-        child: Text(label));
+      style: ElevatedButton.styleFrom(
+        backgroundColor: selected ? Colors.green : Colors.grey,
+      ),
+      onPressed: () => setState(() => mode = m),
+      child: Text(label),
+    );
   }
 }
 
-class CsvPreview extends StatelessWidget {
+class CsvScreen extends StatelessWidget {
 
-  final List<String> lines;
+  final List<String> csv;
   final VoidCallback onShare;
-  final VoidCallback onDiscard;
+  final VoidCallback onDelete;
 
-  const CsvPreview(
-      {super.key,
-      required this.lines,
-      required this.onShare,
-      required this.onDiscard});
+  const CsvScreen({
+    super.key,
+    required this.csv,
+    required this.onShare,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -423,79 +417,75 @@ class CsvPreview extends StatelessWidget {
         children: [
 
           Expanded(
-              child: ListView(
-                  children:
-                      lines.map((e) => Text(e)).toList())),
-
-          SizedBox(
-            width: double.infinity,
-            child: Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.spaceEvenly,
-              children: [
-
-                ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey),
-                    onPressed: () =>
-                        Navigator.pop(context),
-                    child: const Text("Back to Scan")),
-
-                ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green),
-                    onPressed: onShare,
-                    child: const Text("Share CSV")),
-
-                ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red),
-                    onPressed: () {
-                      onDiscard();
-                      Navigator.pop(context);
-                    },
-                    child: const Text("Discard")),
-              ],
+            child: ListView(
+              children: csv.map((e) => Text(e)).toList(),
             ),
           ),
 
-          const SizedBox(height: 20)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                onPressed: onShare,
+                child: const Text("Share"),
+              ),
+
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("Resume scanning"),
+              ),
+
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: onDelete,
+                child: const Text("Delete"),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 }
 
-class ScanFramePainter extends CustomPainter {
+class ScanFrame extends StatelessWidget {
+  const ScanFrame({super.key});
 
-  final double frameHeight;
-  final double progress;
+  @override
+  Widget build(BuildContext context) {
 
-  ScanFramePainter(
-      {required this.frameHeight,
-      required this.progress});
+    return IgnorePointer(
+      child: CustomPaint(
+        painter: FramePainter(),
+        size: Size.infinite,
+      ),
+    );
+  }
+}
+
+class FramePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
 
     final frameWidth = size.width * 0.7;
+    final frameHeight = size.height * 0.35;
 
     final left = (size.width - frameWidth) / 2;
     final top = (size.height - frameHeight) / 2;
 
-    final rect =
-        Rect.fromLTWH(left, top, frameWidth, frameHeight);
+    final rect = Rect.fromLTWH(left, top, frameWidth, frameHeight);
 
-    final overlay = Paint()
-      ..color = Colors.black.withOpacity(0.6);
+    final paint = Paint()..color = Colors.black.withOpacity(0.6);
 
-    canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        overlay);
-
-    canvas.drawRect(
-        rect,
-        Paint()..blendMode = BlendMode.clear);
+    canvas.drawRect(Rect.fromLTRB(0, 0, size.width, top), paint);
+    canvas.drawRect(Rect.fromLTRB(0, top, left, top + frameHeight), paint);
+    canvas.drawRect(Rect.fromLTRB(left + frameWidth, top, size.width, top + frameHeight), paint);
+    canvas.drawRect(Rect.fromLTRB(0, top + frameHeight, size.width, size.height), paint);
 
     final border = Paint()
       ..color = Colors.green
@@ -503,19 +493,8 @@ class ScanFramePainter extends CustomPainter {
       ..strokeWidth = 3;
 
     canvas.drawRect(rect, border);
-
-    final y = top + frameHeight * progress;
-
-    canvas.drawLine(
-        Offset(left, y),
-        Offset(left + frameWidth, y),
-        Paint()
-          ..color = Colors.greenAccent
-          ..strokeWidth = 2);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return true;
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
