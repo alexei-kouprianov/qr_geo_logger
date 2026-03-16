@@ -38,7 +38,15 @@ jobs:
           # Copy your pubspec.yaml from repo root
           cp pubspec.yaml build_app/pubspec.yaml
 
-      # 4. Disable R8 shrinking (required for ML Kit OCR)
+      # 4. Manage permissions
+      - name: Add location permissions
+        run: |
+          sed -i '/<manifest/a\
+          <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
+          <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' \
+          build_app/android/app/src/main/AndroidManifest.xml
+
+      # 5. Disable R8 shrinking (required for ML Kit OCR)
       - name: Patch Gradle for ML Kit
         run: |
           if [ -f build_app/android/app/build.gradle ]; then
@@ -48,20 +56,20 @@ jobs:
           sed -i '/buildTypes {/a\        release {\n            isMinifyEnabled = false\n            isShrinkResources = false\n        }' build_app/android/app/build.gradle.kts
           fi
 
-      # 5. Get dependencies
+      # 6. Get dependencies
       - name: Install dependencies
         run: |
           cd build_app
           flutter pub get
           flutter pub upgrade
 
-      # 6. Build release APK
+      # 7. Build release APK
       - name: Build release APK
         run: |
           cd build_app
           flutter build apk --release
 
-      # 7. Upload APK as artifact
+      # 8. Upload APK as artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

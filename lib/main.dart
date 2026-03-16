@@ -232,6 +232,27 @@ class _ScannerPageState extends State<ScannerPage> {
     });
   }
 
+  Future<void> toggleTorch() async {
+
+    torch = !torch;
+
+    if (mode == ScanMode.code) {
+
+      await scannerController.toggleTorch();
+
+    } else {
+
+      if (torch) {
+        await cameraController?.setFlashMode(FlashMode.torch);
+      } else {
+        await cameraController?.setFlashMode(FlashMode.off);
+      }
+
+    }
+
+    setState(() {});
+  }
+
   void openCsvPreview() {
 
     Navigator.push(
@@ -296,11 +317,9 @@ class _ScannerPageState extends State<ScannerPage> {
 
               IconButton(
                 icon: Icon(
-                    torch ? Icons.flashlight_on : Icons.flashlight_off),
-                onPressed: () {
-                  scannerController.toggleTorch();
-                  setState(() => torch = !torch);
-                },
+                  torch ? Icons.flashlight_on : Icons.flashlight_off,
+                ),
+                onPressed: toggleTorch,
               ),
             ],
           ),
