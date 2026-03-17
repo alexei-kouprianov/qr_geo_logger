@@ -138,8 +138,8 @@ class _ScannerPageState extends State<ScannerPage> {
 
     final lon = lastPosition?.longitude ?? 0;
     final lat = lastPosition?.latitude ?? 0;
-    final alt = lastPosition?.altitude ?? 0;
-    final acc = lastPosition?.accuracy ?? 0;
+    final alt = (lastPosition?.altitude ?? 0).toStringAsFixed(2);
+    final acc = (lastPosition?.accuracy ?? 0).toStringAsFixed(2);
 
     final line = '"$ts","$lon","$lat","$alt","$acc","$text"';
 
@@ -258,9 +258,25 @@ class _ScannerPageState extends State<ScannerPage> {
     setState(() {});
   }
 
-  void openCsvPreview() {
+  void showHelp() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("QRGeoLogger"),
+        content: const Text("QRGeoLogger\nV. 4.3.1"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
 
-    Navigator.push(
+  Future<void> openCsvPreview() async {
+
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CsvScreen(
@@ -270,6 +286,10 @@ class _ScannerPageState extends State<ScannerPage> {
         ),
       ),
     );
+
+    if (result == true) {
+      setState(() {});
+    }
   }
 
   Future<void> shareCsv() async {
@@ -398,6 +418,11 @@ class _ScannerPageState extends State<ScannerPage> {
                   ),
                 ),
 
+                IconButton(
+                  icon: const Icon(Icons.help, color: Colors.white),
+                  onPressed: showHelp,
+                ),
+
                 TextButton(
                   onPressed: openCsvPreview,
                   child: Text(
@@ -472,7 +497,10 @@ class CsvScreen extends StatelessWidget {
 
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                onPressed: onDelete,
+                onPressed: () {
+                  onDelete();
+                  Navigator.pop(context, true);
+                },
                 child: const Text("Delete"),
               ),
             ],

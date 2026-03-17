@@ -38,7 +38,13 @@ jobs:
           # Copy your pubspec.yaml from repo root
           cp pubspec.yaml build_app/pubspec.yaml
 
-      # 4. Manage permissions
+      # 4. Set app name
+      - name: Set app name
+      run: |
+          sed -i 's/android:label=".*"/android:label="QGGeoLogger"/' \
+          build_app/android/app/src/main/AndroidManifest.xml
+
+      # 5. Manage permissions
       - name: Add location permissions
         run: |
           sed -i '/<manifest/a\
@@ -46,7 +52,7 @@ jobs:
           <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' \
           build_app/android/app/src/main/AndroidManifest.xml
 
-      # 5. Disable R8 shrinking (required for ML Kit OCR)
+      # 6. Disable R8 shrinking (required for ML Kit OCR)
       - name: Patch Gradle for ML Kit
         run: |
           if [ -f build_app/android/app/build.gradle ]; then
@@ -56,22 +62,31 @@ jobs:
           sed -i '/buildTypes {/a\        release {\n            isMinifyEnabled = false\n            isShrinkResources = false\n        }' build_app/android/app/build.gradle.kts
           fi
 
-      # 6. Get dependencies
+      # 7. Get dependencies
       - name: Install dependencies
         run: |
           cd build_app
           flutter pub get
           flutter pub upgrade
 
-      # 7. Build release APK
+      # 8. Build release APK
       - name: Build release APK
         run: |
           cd build_app
           flutter build apk --release
 
-      # 8. Upload APK as artifact
+      # 9. Rename APK
+      - name: Rename APK
+      run: |
+          mv build_app/build/app/outputs/flutter-apk/app-release.apk \
+          build_app/build/app/outputs/flutter-apk/QGGeoLogger.apk
+
+      # 10. Upload APK as artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: qr_geo_logger_apk
-          path: build_app/build/app/outputs/flutter-apk/app-release.apk
+          name: QGGeoLogger_apk
+          path: build_app/build/app/outputs/flutter-apk/QGGeoLogger.apk
+        # with:
+        #   name: qr_geo_logger_apk
+        #   path: build_app/build/app/outputs/flutter-apk/app-release.apk
