@@ -54,6 +54,7 @@ class _ScannerPageState extends State<ScannerPage> {
   ScanMode mode = ScanMode.code;
 
   bool torch = false;
+  bool scanningActive = false;
 
   String detected = "";
   String preview = "";
@@ -101,7 +102,9 @@ class _ScannerPageState extends State<ScannerPage> {
     }
 
     Geolocator.getPositionStream().listen((pos) {
-      lastPosition = pos;
+      setState(() {
+        lastPosition = pos;
+      });
     });
   }
 
@@ -149,6 +152,7 @@ class _ScannerPageState extends State<ScannerPage> {
   void onCapture() async {
 
     if (mode == ScanMode.code) {
+      scanningActive = true;
       scannerController.start();
     } else {
       runOcr();
@@ -157,12 +161,13 @@ class _ScannerPageState extends State<ScannerPage> {
 
   void onBarcode(BarcodeCapture capture) {
 
-    if (previewVisible) return;
+    if (!scanningActive || previewVisible) return;
 
     final raw = capture.barcodes.first.rawValue;
     if (raw == null) return;
 
-    // scannerController.stop(); // keep preview alive
+    scannerController.stop();
+    scanningActive = false;
 
     if (raw == detected) return;
 
