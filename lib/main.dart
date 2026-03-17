@@ -162,7 +162,7 @@ class _ScannerPageState extends State<ScannerPage> {
     final raw = capture.barcodes.first.rawValue;
     if (raw == null) return;
 
-    scannerController.stop();
+    // scannerController.stop(); // keep preview alive
 
     if (raw == detected) return;
 
@@ -287,6 +287,8 @@ class _ScannerPageState extends State<ScannerPage> {
     history.clear();
 
     await sessionFile!.writeAsString(csv.join("\n"));
+
+    setState(() {});
   }
 
   @override
@@ -382,16 +384,23 @@ class _ScannerPageState extends State<ScannerPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
 
-                Text(lastPosition == null
-                    ? "GPS..."
-                    : "GPS ±${lastPosition!.accuracy.toStringAsFixed(1)} m"),
-
-                Text("Records ${csv.length - 1}"),
+                Expanded(
+                  child: Text(
+                    lastPosition == null
+                        ? "GPS ..."
+                        : "GPS ±${lastPosition!.accuracy.toStringAsFixed(1)} m",
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
 
                 TextButton(
                   onPressed: openCsvPreview,
-                  child: const Text("CSV"),
+                  child: Text(
+                    "CSV (${csv.length - 1})",
+                    style: const TextStyle(color: Colors.white),
+                  ),
                 ),
+
               ],
             ),
           )
