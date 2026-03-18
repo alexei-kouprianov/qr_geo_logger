@@ -76,7 +76,7 @@ jobs:
 
       # 9. Rename APK
       - name: Rename APK
-      run: |
+        run: |
           mv build_app/build/app/outputs/flutter-apk/app-release.apk \
           build_app/build/app/outputs/flutter-apk/QGGeoLogger.apk
 
