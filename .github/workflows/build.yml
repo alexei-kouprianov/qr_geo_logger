@@ -40,9 +40,8 @@ jobs:
 
       # 4. Set app name
       - name: Set app name
-      run: |
-          sed -i 's/android:label=".*"/android:label="QGGeoLogger"/' \
-          build_app/android/app/src/main/AndroidManifest.xml
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="QGGeoLogger"/' build_app/android/app/src/main/AndroidManifest.xml
 
       # 5. Manage permissions
       - name: Add location permissions
