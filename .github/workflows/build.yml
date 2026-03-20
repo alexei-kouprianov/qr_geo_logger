@@ -41,15 +41,13 @@ jobs:
       # 4. Set app name
       - name: Set app name
         run: |
-          sed -i 's/android:label="[^"]*"/android:label="QGGeoLogger"/' build_app/android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="[^"]*"/android:label="QRGeoLogger"/' build_app/android/app/src/main/AndroidManifest.xml
 
       # 5. Manage permissions
       - name: Add location permissions
         run: |
-          sed -i '/<manifest/a\
-          <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
-          <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' \
-          build_app/android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>' build_app/android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' build_app/android/app/src/main/AndroidManifest.xml
 
       # 6. Disable R8 shrinking (required for ML Kit OCR)
       - name: Patch Gradle for ML Kit
@@ -78,14 +76,14 @@ jobs:
       - name: Rename APK
         run: |
           mv build_app/build/app/outputs/flutter-apk/app-release.apk \
-          build_app/build/app/outputs/flutter-apk/QGGeoLogger.apk
+          build_app/build/app/outputs/flutter-apk/QRGeoLogger.apk
 
       # 10. Upload APK as artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: QGGeoLogger_apk
-          path: build_app/build/app/outputs/flutter-apk/QGGeoLogger.apk
+          name: QRGeoLogger_apk
+          path: build_app/build/app/outputs/flutter-apk/QRGeoLogger.apk
         # with:
         #   name: qr_geo_logger_apk
         #   path: build_app/build/app/outputs/flutter-apk/app-release.apk
