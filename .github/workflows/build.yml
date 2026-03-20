@@ -45,7 +45,7 @@ jobs:
 
       # 5. Manage permissions
       - name: Add location permissions
-      run: |
+        run: |
           sed -i '/<manifest/a\
           <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
           <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' \
