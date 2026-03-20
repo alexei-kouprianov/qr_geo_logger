@@ -263,7 +263,7 @@ class _ScannerPageState extends State<ScannerPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("QRGeoLogger"),
-        content: const Text("QRGeoLogger\nV. 4.3.1"),
+        content: const Text("QRGeoLogger\nV. 4.3.2"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
