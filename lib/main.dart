@@ -106,13 +106,26 @@ class _ScannerPageState extends State<ScannerPage> {
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
-      lastPosition = pos;
-    } catch (_) {}
+
+      if (!mounted) return;
+
+      setState(() {
+        lastPosition = pos;
+      });
+
+    } catch (_) {
+      // silently ignore (no crash if GPS temporarily unavailable)
+    }
 
     // 🔄 Then keep listening
     Geolocator.getPositionStream().listen((pos) {
-      lastPosition = pos;
+      if (!mounted) return;
+
+      setState(() {
+        lastPosition = pos;
+      });
     });
+
   }
 
   Future<void> initSession() async {
@@ -270,7 +283,7 @@ class _ScannerPageState extends State<ScannerPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("QRGeoLogger"),
-        content: const Text("QRGeoLogger\nV. 4.3.3"),
+        content: const Text("QRGeoLogger\nV. 4.3.4"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
