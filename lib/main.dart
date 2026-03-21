@@ -44,6 +44,8 @@ class ScannerPage extends StatefulWidget {
 
 class _ScannerPageState extends State<ScannerPage> {
 
+  String gpsDebug = "";
+
   final MobileScannerController scannerController =
       MobileScannerController(autoStart: false);
 
@@ -90,11 +92,7 @@ class _ScannerPageState extends State<ScannerPage> {
 
   Future<void> initGps() async {
 
-    String gpsDebug = "";
     print("Permission: $permission");
-    setState(() {
-      gpsDebug = permission.toString();
-    });
 
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
 
@@ -106,8 +104,16 @@ class _ScannerPageState extends State<ScannerPage> {
     // 🔐 Check permission
     var permission = await Geolocator.checkPermission();
 
+    setState(() {
+      gpsDebug = permission.toString();
+    });
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
+
+      setState(() {
+        gpsDebug = permission.toString();
+      });
     }
 
     if (permission == LocationPermission.denied ||
