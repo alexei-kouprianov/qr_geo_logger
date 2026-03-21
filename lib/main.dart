@@ -90,6 +90,14 @@ class _ScannerPageState extends State<ScannerPage> {
 
   Future<void> initGps() async {
 
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      print("GPS SERVICE DISABLED");
+      return;
+    }
+
+    // 🔐 Check permission
     var permission = await Geolocator.checkPermission();
 
     if (permission == LocationPermission.denied) {
@@ -283,7 +291,7 @@ class _ScannerPageState extends State<ScannerPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("QRGeoLogger"),
-        content: const Text("QRGeoLogger\nV. 4.3.4"),
+        content: const Text("QRGeoLogger\nV. 4.3.5"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
