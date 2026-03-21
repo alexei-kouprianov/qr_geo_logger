@@ -43,13 +43,16 @@ jobs:
         run: |
           sed -i 's/android:label="[^"]*"/android:label="QRGeoLogger"/' build_app/android/app/src/main/AndroidManifest.xml
 
-      # 5. Manage permissions
+      # 5. Add location permissions (SAFE FIX)
       - name: Add location permissions
         run: |
-          sed -i '/<manifest/a\
+          FILE=build_app/android/app/src/main/AndroidManifest.xml
+
+          # Insert BEFORE <application> (correct place)
+          sed -i '/<application/i\
           <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
-          <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' \
-          build_app/android/app/src/main/AndroidManifest.xml
+          <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>' $FILE
+
 
       # 6. Disable R8 shrinking (required for ML Kit OCR)
       - name: Patch Gradle for ML Kit
