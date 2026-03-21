@@ -101,10 +101,17 @@ class _ScannerPageState extends State<ScannerPage> {
       return;
     }
 
+    // 🔥 Force immediate GPS read (IMPORTANT)
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      lastPosition = pos;
+    } catch (_) {}
+
+    // 🔄 Then keep listening
     Geolocator.getPositionStream().listen((pos) {
-      setState(() {
-        lastPosition = pos;
-      });
+      lastPosition = pos;
     });
   }
 
@@ -263,7 +270,7 @@ class _ScannerPageState extends State<ScannerPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("QRGeoLogger"),
-        content: const Text("QRGeoLogger\nV. 4.3.2"),
+        content: const Text("QRGeoLogger\nV. 4.3.3"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
